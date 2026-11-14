@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Launch Radar</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; background: #0d1117; color: #e6edf3; margin: 0; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #8b949e; font-size: 13px; margin-bottom: 16px; }
+  .banner { padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
+  .banner.live { background: #12261a; border: 1px solid #2ea043; }
+  .banner.degraded { background: #2b2111; border: 1px solid #d29922; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #21262d; }
+  th { color: #8b949e; font-weight: 600; }
+  tr { cursor: pointer; }
+  tr:hover td { background: #161b22; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .WATCH { background: #12261a; color: #3fb950; border: 1px solid #2ea043; }
+  .CAUTION { background: #2b2111; color: #d29922; border: 1px solid #d29922; }
+  .AVOID { background: #2b1215; color: #f85149; border: 1px solid #f85149; }
+  .sample { color: #8b949e; font-size: 11px; border: 1px solid #30363d; border-radius: 4px; padding: 1px 5px; margin-left: 6px; }
+  #detail { margin-top: 20px; padding: 16px; border: 1px solid #30363d; border-radius: 8px; background: #161b22; display: none; }
+  #detail h2 { font-size: 18px; margin: 0 0 8px; }
+  #detail ul { margin: 8px 0; padding-left: 20px; }
+  #detail li { margin-bottom: 6px; font-size: 14px; }
+  .pts { font-family: monospace; }
+  .muted { color: #8b949e; }
+  code { font-size: 12px; word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>📡 Token Launch Radar</h1>
+<div class="sub">New pump.fun launches, scored for risk with plain-language reasons. Observation only — no trading. Refreshes every 15s.</div>
+<div id="banner" class="banner degraded">Checking feed status…</div>
+<table>
+  <thead><tr><th>Token</th><th>Verdict</th><th>Risk</th><th>MCap (SOL)</th><th>Curve</th><th>Seen</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<div id="detail"></div>
+<script>
+async function load() {
+  const [health, radar] = await Promise.all([
+    fetch('/health').then(r => r.json()),
+    fetch('/radar?limit=50').then(r => r.json())
+  ]);
+  const banner = document.getElementById('banner');
+  if (health.degraded) {
+    banner.className = 'banner degraded';
+    banner.textContent = '⚠ Live feed unreachable — showing seeded samples. The radar keeps retrying the feed in the background.';
+  } else {
+    banner.className = 'banner live';
+    banner.textContent = `● LIVE — connected to PumpPortal · ${health.store.live} live tokens tracked · last event ${health.feed.lastEventAt ? new Date(health.feed.lastEventAt).toLocaleTimeString() : '—'}`;
+  }
+  const rows = document.getElementById('rows');
+  rows.innerHTML = radar.tokens.map(t => `<tr data-mint="${t.mint}">
+    <td><strong>${esc(t.symbol || '—')}</strong> <span class="muted">${esc(t.name || '')}</span>${t.seeded ? '<span class="sample">SAMPLE</span>' : ''}<br><code>${esc(t.mint.slice(0, 12))}…</code></td>
+    <td><span class="badge ${t.verdict}">${t.verdict}</span></td>
+    <td>${t.score}</td>
+    <td>${t.marketCapSol === null ? '—' : t.marketCapSol.toFixed(1)}</td>
+    <td>${t.bondingProgress === null ? '—' : Math.round(t.bondingProgress * 100) + '%'}</td>
+    <td>${new Date(t.firstSeenAt).toLocaleTimeString()}</td>
+  </tr>`).join('');
+  rows.querySelectorAll('tr').forEach(tr => tr.onclick = () => showDetail(tr.dataset.mint));
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function showDetail(mint) {
+  const t = await fetch('/token/' + encodeURIComponent(mint)).then(r => r.json());
+  const el = document.getElementById('detail');
+  el.style.display = 'block';
+  el.innerHTML = `<h2>${esc(t.symbol)} — ${esc(t.name)} <span class="badge ${t.verdict}">${t.verdict} · ${t.score}/100 risk</span>${t.seeded ? '<span class="sample">SAMPLE</span>' : ''}</h2>
+  <div class="muted"><code>${esc(t.mint)}</code> · first seen ${new Date(t.firstSeenAt).toLocaleString()}</div>
+  <h3>Why this verdict</h3>
+  <ul>${t.reasons.map(r => `<li><span class="pts">${r.points > 0 ? '+' : ''}${r.points}</span> — ${esc(r.detail)}</li>`).join('') || '<li>No signals moved the score.</li>'}</ul>
+  ${t.unknowns.length ? `<h3>Could not verify</h3><ul>${t.unknowns.map(u => `<li>${esc(u.detail)}</li>`).join('')}</ul>` : ''}
+  <div class="muted">Mint authority: ${fmtBool(t.enrichment.mintAuthorityEnabled, 'enabled', 'revoked')} · Freeze authority: ${fmtBool(t.enrichment.freezeAuthorityEnabled, 'enabled', 'revoked')} · Top holder: ${t.enrichment.topHolderPct === undefined || t.enrichment.topHolderPct === null ? 'unknown' : t.enrichment.topHolderPct.toFixed(1) + '%'}</div>`;
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function fmtBool(v, yes, no) { return v === null || v === undefined ? 'unknown' : (v ? yes : no); }
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
