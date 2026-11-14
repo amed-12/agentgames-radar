@@ -103,9 +103,10 @@ Signals that cannot be verified (e.g. RPC unreachable) are listed under
   source fail independently. The radar serves what it has and says so.
 - **Minimal dependencies.** Plain Node `http` + `ws` + `https-proxy-agent`
   only — fewer moving parts, faster review.
-- **Proxy-aware by construction.** All outbound traffic (websocket and
-  HTTPS) goes through an explicit proxy agent with sanitized credentials,
-  because this host's egress requires it.
+- **Proxy-aware, proxy-optional.** All outbound traffic (websocket and
+  HTTPS) goes through an explicit proxy agent when `RADAR_PROXY_URL`
+  (or the standard `*_PROXY` variables) is set, and direct otherwise —
+  so the same code runs on a proxied host and on an open VPS.
 - **No persistence.** A 200-token ring buffer is enough for a radar; a
   restart refills from the live feed within seconds.
 

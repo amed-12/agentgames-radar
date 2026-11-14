@@ -3,14 +3,20 @@
 /**
  * Outbound HTTP plumbing.
  *
- * This agent runs behind an egress proxy. The `ws` library and Node's
- * `https` module do not pick up proxy settings on their own, so every
- * outbound request goes through an explicit HttpsProxyAgent.
+ * The `ws` library and Node's `https` module do not pick up proxy
+ * settings on their own, so when a proxy IS needed every outbound
+ * request goes through an explicit HttpsProxyAgent.
  *
- * The proxy URL is sanitized: any embedded username/password is stripped
- * because proxy credentials rotate and stale ones are rejected (407).
- * The proxy accepts credential-less requests, so the sanitized form is
- * the reliable one.
+ * The proxy is opt-in via environment: `RADAR_PROXY_URL`, or the
+ * standard `HTTPS_PROXY`/`HTTP_PROXY` variables. When none is set,
+ * connections go direct (the normal case on a VPS with open
+ * egress). There is no hardcoded proxy host: a default that only
+ * exists on one machine would silently break the feed everywhere
+ * else.
+ *
+ * When a proxy URL is set it is sanitized: any embedded
+ * username/password is stripped because proxy credentials can
+ * rotate and stale ones are rejected (407).
  */
 
 const http = require('http');
@@ -18,18 +24,17 @@ const https = require('https');
 const fs = require('fs');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 
-const DEFAULT_PROXY_URL = 'http://hatch-egress-proxy:3128';
 const SYSTEM_CA_BUNDLE = '/etc/ssl/certs/ca-certificates.crt';
 
 function sanitizeProxyUrl(raw) {
-  if (!raw) return DEFAULT_PROXY_URL;
+  if (!raw) return null;
   try {
     const parsed = new URL(raw);
     parsed.username = '';
     parsed.password = '';
     return parsed.toString().replace(/\/$/, '');
   } catch {
-    return DEFAULT_PROXY_URL;
+    return null;
   }
 }
 
@@ -40,14 +45,19 @@ function proxyUrl() {
     process.env.https_proxy ||
     process.env.HTTP_PROXY ||
     process.env.http_proxy ||
-    DEFAULT_PROXY_URL;
+    null;
   return sanitizeProxyUrl(raw);
 }
 
 let agentSingleton = null;
+let agentResolved = false;
 
 function proxyAgent() {
-  if (agentSingleton) return agentSingleton;
+  if (agentResolved) return agentSingleton;
+  agentResolved = true;
+  const url = proxyUrl();
+  // No proxy configured: undefined means "connect direct".
+  if (!url) return undefined;
   const options = { keepAlive: true };
   // The egress proxy re-signs TLS with a local CA that lives in the
   // system bundle. When the bundle exists, trust it (it is a superset
@@ -60,7 +70,7 @@ function proxyAgent() {
   } catch {
     // Ignore: default trust store will be used.
   }
-  agentSingleton = new HttpsProxyAgent(proxyUrl(), options);
+  agentSingleton = new HttpsProxyAgent(url, options);
   return agentSingleton;
 }
 
@@ -121,4 +131,4 @@ function fetchJson(url, { method = 'GET', body = null, timeoutMs = 8000, headers
   });
 }
 
-module.exports = { proxyUrl, proxyAgent, fetchJson, DEFAULT_PROXY_URL };
+module.exports = { proxyUrl, proxyAgent, fetchJson };

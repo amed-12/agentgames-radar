@@ -5,9 +5,9 @@
  *
  * The socket is public and keyless: after connecting we send
  * `{"method":"subscribeNewToken"}` and creation events arrive in
- * real time. The `ws` library needs an explicit proxy agent on this
- * host — a direct connection fails — so the agent from proxy.js is
- * passed to every connection attempt.
+ * real time. On hosts behind an egress proxy the `ws` library needs
+ * an explicit proxy agent (see proxy.js); otherwise it connects
+ * direct.
  *
  * Reconnects use exponential backoff (5s, x1.5, capped at 60s).
  * If the feed is down, the radar keeps serving seeded samples and
